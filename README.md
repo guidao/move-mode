@@ -2,7 +2,7 @@
 
 # (WIP) Move-mode
 
-Used by move-lang
+A emacs major mode for move-lang
 
 ## Support Features
 
