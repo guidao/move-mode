@@ -43,6 +43,12 @@
     (modify-syntax-entry ?< "(>" table)
     (modify-syntax-entry ?> ")<" table)
 
+    ;; Comments
+    (modify-syntax-entry ?/  ". 124b" table)
+    (modify-syntax-entry ?*  ". 23n"  table)
+    (modify-syntax-entry ?\n "> b"    table)
+    (modify-syntax-entry ?\^m "> b"   table)
+
     table))
 
 
@@ -58,7 +64,7 @@
     "existential" "mod" "trait"
     "move" "mut" "ref"
     "static" "const" "await"
-    "const"))
+    "const" "acquires"))
 
 
 (defconst move-special-types
@@ -73,6 +79,48 @@
       (group upper (0+ (any word nonascii digit "_")))
       symbol-end))
 
+
+(defmacro move-paren-level ()
+  `(car (syntax-ppss)))
+
+(defmacro move-in-string-or-comment-p ()
+  `(nth 8 (syntax-ppss)))
+
+(defmacro move-in-string-p ()
+  `(nth 3 (syntax-ppss)))
+
+(defmacro go-in-comment-p ()
+  `(nth 4 (syntax-ppss)))
+
+(defun move-line-paren-level ()
+  (interactive)
+  (save-excursion
+    (let ((left nil) (right nil))
+      (beginning-of-line)
+      (setq left (move-paren-level))
+      (end-of-line)
+      (setq right (move-paren-level))
+      (min left right))))
+
+
+
+(defun move-mode-indent-line ()
+  (interactive)
+  (let ((origin-paren-level (move-line-paren-level))
+	(not-indented t)
+	(cur-indent 0))
+    (save-excursion
+    (while not-indented
+      (forward-line -1)
+      (if (bobp)
+	(setq not-indented nil)
+	(if (>= (move-line-paren-level) origin-paren-level)
+	  nil
+	  (progn
+	    (setq cur-indent (+ move-indent-offset (current-indentation)))
+	    (setq not-indented nil))))
+      ))
+   (indent-to (- cur-indent (current-indentation)))))
 
 (defun move-path-font-lock-matcher (re-ident)
   "Match occurrences of RE-IDENT followed by a double-colon.
@@ -95,8 +143,21 @@ Does not match type annotations of the form \"foo::<\"."
 (defconst move-re-uc-ident "[[:upper:]][[:word:][:multibyte:]_[:digit:]]*")
 (defconst move-re-ident "[[:word:][:multibyte:]_][[:word:][:multibyte:]_[:digit:]]*")
 (defconst move-re-lc-ident "[[:lower:][:multibyte:]_][[:word:][:multibyte:]_[:digit:]]*")
+(defconst move-identifier-regexp "[[:word:][:multibyte:]]+")
+
 
 (defun move-re-grab (inner) (concat "\\(" inner "\\)"))
+
+(defun move-mode-syntactic-face-function (state)
+  "Return face that distinguishes doc and normal comments in given syntax STATE."
+  (if (nth 3 state)
+      'font-lock-string-face
+    (save-excursion
+      (goto-char (nth 8 state))
+      (if (looking-at "/\\([*][*!][^*!]\\|/[/!][^/!]\\)")
+          'font-lock-doc-face
+        'font-lock-comment-face))))
+
 
 (defvar move-font-lock-keywords
   `(
@@ -108,6 +169,7 @@ Does not match type annotations of the form \"foo::<\"."
                "\\_>")
      . font-lock-variable-name-face)
     (,(move-path-font-lock-matcher move-re-uc-ident) . font-lock-type-face)
+    (,(concat "\\_<fun\\_>\\s *\\(" move-identifier-regexp "\\)") . font-lock-function-name-face)
     ))
 
 (define-derived-mode move-mode prog-mode "Move"
@@ -116,10 +178,14 @@ Does not match type annotations of the form \"foo::<\"."
 \\{move-mode-map}"
   :group 'move-mode
   :syntax-table move-mode-syntax-table
-
+  
+  (setq-local indent-line-function 'move-mode-indent-line)
   (setq-local comment-start "// ")
   (setq-local comment-end  "")
-  (setq-local font-lock-defaults '(move-font-lock-keywords))
+  (setq-local font-lock-defaults '(move-font-lock-keywords
+				   nil nil nil nil
+				   (font-lock-syntactic-face-function
+				    . move-mode-syntactic-face-function)))
   (setq-local paragraph-separate paragraph-start)
   (setq prettify-symbols-alist rust-prettify-symbols-alist)
   (setq-local tab-width 4)
