@@ -64,7 +64,8 @@
     "existential" "mod" "trait"
     "move" "mut" "ref"
     "static" "const" "await"
-    "const" "acquires"))
+    "const" "acquires" "while"
+    "loop" "spec"))
 
 
 (defconst move-special-types
@@ -120,7 +121,7 @@
 	    (setq cur-indent (+ move-indent-offset (current-indentation)))
 	    (setq not-indented nil))))
       ))
-   (indent-to (- cur-indent (current-indentation)))))
+   (indent-to cur-indent)))
 
 (defun move-path-font-lock-matcher (re-ident)
   "Match occurrences of RE-IDENT followed by a double-colon.
