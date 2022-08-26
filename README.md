@@ -1,6 +1,6 @@
 
 
-# (WIP) Move-mode
+# Move-mode
 
 A emacs major mode for move-lang
 

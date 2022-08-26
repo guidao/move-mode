@@ -51,6 +51,71 @@
 
     table))
 
+(defun move-is-lt-char-operator ()
+  (let ((continue t) (lt nil))
+    (while continue
+      (forward-char)
+      (skip-chars-forward "[:space:]\n")
+      (cond 
+       ((= (following-char) ?>)
+	 (setq continue nil)
+	 (setq lt nil))
+       ((memq (following-char) (string-to-list "[-=!%&*/<>[{(|.^;)}]"))
+	 (setq continue nil)
+	 (setq lt t))))
+    lt))
+
+(defun move-is-gt-char-operator ()
+  (let ((continue t) (gt nil))
+    (while continue
+      (backward-char)
+      (skip-chars-backward "[:space:]\n")
+      (cond
+       ((= (following-char) ?<)
+	(setq continue nil)
+	(setq gt nil))
+       ((memq (following-char) (string-to-list "[-=!%&*/<>[{(|.^;)}]"))
+	(setq continue nil)
+	(setq gt t))))
+    gt))
+
+
+
+(defun move-is-lt-pprint ()
+  (interactive)
+  (message "%s" (move-is-gt-char-operator)))
+
+(defun move-ordinary-lt-gt-p ()
+  (save-match-data
+    (save-excursion
+      (goto-char (match-beginning 0))
+      (cond
+       ((move-in-string-or-comment-p) t)
+       ((= (following-char) ?<)
+	(move-is-lt-char-operator))
+       ((= (following-char) ?>)
+	(move-is-gt-char-operator))
+       ))))
+
+(defun move-syntax-propertize (start end)
+  (goto-char start)
+  (funcall
+   (syntax-propertize-rules
+    ("<"
+     (0 (ignore
+	 (when (move-ordinary-lt-gt-p)
+	   (put-text-property (match-beginning 0) (match-end 0)
+			      'syntax-table (string-to-syntax "."))
+	   (goto-char (match-end 0))))))
+    (">"
+     (0 (ignore
+	 (when (move-ordinary-lt-gt-p)
+	   (put-text-property (match-beginning 0) (match-end 0)
+			      'syntax-table (string-to-syntax "."))
+	   (goto-char (match-end 0)))))))
+   
+   (point) end))
+
 
 (defconst move-keywords
   '("break" "box" "continue"
@@ -65,7 +130,8 @@
     "move" "mut" "ref"
     "static" "const" "await"
     "const" "acquires" "while"
-    "loop" "spec"))
+    "loop" "spec" "if"
+    "true" "else" "false"))
 
 
 (defconst move-special-types
@@ -103,6 +169,9 @@
       (setq right (move-paren-level))
       (min left right))))
 
+(defun move-line-paren-level-pprint ()
+  (interactive)
+  (message "%s" (move-line-paren-level)))
 
 
 (defun move-mode-indent-line ()
@@ -121,7 +190,8 @@
 	    (setq cur-indent (+ move-indent-offset (current-indentation)))
 	    (setq not-indented nil))))
       ))
-   (indent-to cur-indent)))
+    (back-to-indentation)
+    (indent-to cur-indent)))
 
 (defun move-path-font-lock-matcher (re-ident)
   "Match occurrences of RE-IDENT followed by a double-colon.
@@ -145,9 +215,20 @@ Does not match type annotations of the form \"foo::<\"."
 (defconst move-re-ident "[[:word:][:multibyte:]_][[:word:][:multibyte:]_[:digit:]]*")
 (defconst move-re-lc-ident "[[:lower:][:multibyte:]_][[:word:][:multibyte:]_[:digit:]]*")
 (defconst move-identifier-regexp "[[:word:][:multibyte:]]+")
+(defconst move-re-generic
+  (concat "<[[:space:]]*'" move-re-ident "[[:space:]]*>"))
+
 
 
 (defun move-re-grab (inner) (concat "\\(" inner "\\)"))
+(defun move-re-word (inner) (concat "\\<" inner "\\>"))
+(defun move-re-shy (inner) (concat "\\(?:" inner "\\)"))
+
+(defun move-re-item-def (itype)
+  (concat (move-re-word itype)
+          (move-re-shy move-re-generic) "?"
+          "[[:space:]]+" (move-re-grab move-re-ident)))
+
 
 (defun move-mode-syntactic-face-function (state)
   "Return face that distinguishes doc and normal comments in given syntax STATE."
@@ -161,17 +242,21 @@ Does not match type annotations of the form \"foo::<\"."
 
 
 (defvar move-font-lock-keywords
-  `(
-    (,(regexp-opt move-keywords 'symbols) . font-lock-keyword-face)
-    (,(regexp-opt move-special-types 'symbols) . font-lock-type-face)
-    (,move-re-type-or-constructor . font-lock-type-face)
-    (,(concat "\\_<\\(?:let\\s-+ref\\|let\\|ref\\|for\\)\\s-+\\(?:mut\\s-+\\)?"
-               (move-re-grab move-re-ident)
-               "\\_>")
-     . font-lock-variable-name-face)
-    (,(move-path-font-lock-matcher move-re-uc-ident) . font-lock-type-face)
-    (,(concat "\\_<fun\\_>\\s *\\(" move-identifier-regexp "\\)") . font-lock-function-name-face)
-    ))
+  (append `(
+	       (,(regexp-opt move-keywords 'symbols) . font-lock-keyword-face)
+	       (,(regexp-opt move-special-types 'symbols) . font-lock-type-face)
+	       (,move-re-type-or-constructor . font-lock-type-face)
+	       (,(concat "\\_<\\(?:let\\s-+ref\\|let\\|ref\\|for\\)\\s-+\\(?:mut\\s-+\\)?"
+			 (move-re-grab move-re-ident)
+			 "\\_>")
+		. font-lock-variable-name-face)
+	       (,(move-path-font-lock-matcher move-re-uc-ident) . font-lock-type-face)
+	       )
+	  (mapcar #'(lambda (x) (list (move-re-item-def (car x)) 1 (cdr x)))
+	  '(("module" . font-lock-type-face)
+	    ("fun" . font-lock-function-name-face)))))
+
+
 
 (define-derived-mode move-mode prog-mode "Move"
   "Major mode for Move code.
@@ -179,7 +264,8 @@ Does not match type annotations of the form \"foo::<\"."
 \\{move-mode-map}"
   :group 'move-mode
   :syntax-table move-mode-syntax-table
-  
+
+  (setq-local syntax-propertize-function #'move-syntax-propertize)
   (setq-local indent-line-function 'move-mode-indent-line)
   (setq-local comment-start "// ")
   (setq-local comment-end  "")
